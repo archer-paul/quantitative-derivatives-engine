@@ -33,15 +33,23 @@ from .models.jump_diffusion import MertonJumpDiffusionModel, JumpDiffusionParame
 from .models.finite_difference import FiniteDifferencePricer
 
 # Exotic options imports
-from .exotic.barrier_options import BarrierOptions
-from .exotic.asian_options import AsianOptions
-from .exotic.lookback_options import LookbackOptions
 from .exotic.exotic_engine import ExoticOptions
 
-# Utility imports
-from .utils.visualization import VisualizationTools
-from .utils.performance import PerformanceBenchmark
-from .utils.risk_analysis import RiskAnalyzer
+# Utility imports (optional dependencies)
+try:
+    from .utils.visualization import VisualizationTools
+except ImportError:
+    VisualizationTools = None
+
+try:
+    from .utils.performance import PerformanceBenchmark
+except ImportError:
+    PerformanceBenchmark = None
+    
+try:
+    from .utils.risk_analysis import RiskAnalyzer
+except ImportError:
+    RiskAnalyzer = None
 
 # Make key classes available at package level
 __all__ = [
@@ -63,13 +71,10 @@ __all__ = [
     
     # Exotic options
     "ExoticOptions",
-    "BarrierOptions",
-    "AsianOptions",
-    "LookbackOptions",
     
-    # Utilities
+    # Utilities (may be None if dependencies not installed)
     "VisualizationTools",
-    "PerformanceBenchmark",
+    "PerformanceBenchmark", 
     "RiskAnalyzer",
 ]
 

@@ -72,55 +72,95 @@ class DerivativesPricingEngine:
             'pricing_times': {}
         }
         
-        # Black-Scholes pricing benchmark
+        # Black-Scholes pricing and Greeks
+        print("Computing Black-Scholes pricing...")
         start_time = time.perf_counter()
-        for _ in range(n_iterations):
-            _ = self.bs_model.price(market_data, option_type)
-        bs_time = (time.perf_counter() - start_time) / n_iterations * 1000  # ms
         
-        benchmark_results['black_scholes_pricing'] = {
-            'avg_time_ms': bs_time,
-            'iterations': n_iterations,
-            'ops_per_second': 1000 / bs_time if bs_time > 0 else float('inf')
+        bs_price = self.bs_model.price(market_data, option_type)
+        bs_greeks = self.bs_model.greeks(market_data, option_type)
+        
+        bs_time = time.perf_counter() - start_time
+        self._pricing_times['black_scholes'].append(bs_time)
+        
+        results['black_scholes'] = {
+            'price': bs_price,
+            'greeks': bs_greeks
         }
+        results['pricing_times']['black_scholes'] = bs_time
         
-        # Greeks calculation benchmark
-        start_time = time.perf_counter()
-        for _ in range(n_iterations):
-            _ = self.bs_model.greeks(market_data, option_type)
-        greeks_time = (time.perf_counter() - start_time) / n_iterations * 1000  # ms
-        
-        benchmark_results['greeks_calculation'] = {
-            'avg_time_ms': greeks_time,
-            'iterations': n_iterations,
-            'ops_per_second': 1000 / greeks_time if greeks_time > 0 else float('inf')
-        }
-        
-        # Finite difference benchmark (fewer iterations due to computational cost)
-        fd_iterations = min(100, n_iterations)
-        start_time = time.perf_counter()
-        for _ in range(fd_iterations):
-            _ = self.fd_pricer.implicit_fd_vanilla(
-                market_data, option_type, S_max=2*market_data.S0, M=50, N=100
+        # Heston model pricing (if parameters provided)
+        if heston_params:
+            print("Computing Heston stochastic volatility pricing...")
+            heston_model = HestonModel(heston_params)
+            
+            # FFT pricing
+            start_time = time.perf_counter()
+            try:
+                heston_fft_price = heston_model.price_fft(market_data, option_type)
+                fft_time = time.perf_counter() - start_time
+                self._pricing_times['heston_fft'].append(fft_time)
+                results['pricing_times']['heston_fft'] = fft_time
+            except Exception as e:
+                print(f"FFT pricing failed: {e}")
+                heston_fft_price = None
+                fft_time = None
+            
+            # Monte Carlo pricing
+            start_time = time.perf_counter()
+            heston_mc_price, heston_mc_ci = heston_model.monte_carlo_price(
+                market_data, option_type, n_paths=50000
             )
-        fd_time = (time.perf_counter() - start_time) / fd_iterations * 1000  # ms
+            mc_time = time.perf_counter() - start_time
+            self._pricing_times['heston_mc'].append(mc_time)
+            results['pricing_times']['heston_mc'] = mc_time
+            
+            results['heston'] = {
+                'fft_price': heston_fft_price,
+                'monte_carlo_price': heston_mc_price,
+                'monte_carlo_ci': heston_mc_ci,
+                'parameters': asdict(heston_params)
+            }
         
-        benchmark_results['finite_difference'] = {
-            'avg_time_ms': fd_time,
-            'iterations': fd_iterations,
-            'ops_per_second': 1000 / fd_time if fd_time > 0 else float('inf')
-        }
+        # Jump-diffusion model pricing (if parameters provided)
+        if jump_params:
+            print("Computing Merton jump-diffusion pricing...")
+            jd_model = MertonJumpDiffusionModel(jump_params)
+            
+            # Analytical pricing
+            start_time = time.perf_counter()
+            jd_analytical_price = jd_model.price_analytical(market_data, option_type)
+            analytical_time = time.perf_counter() - start_time
+            self._pricing_times['jump_diffusion'].append(analytical_time)
+            results['pricing_times']['jump_diffusion'] = analytical_time
+            
+            # Monte Carlo pricing
+            jd_mc_price, jd_mc_ci = jd_model.monte_carlo_price(
+                market_data, option_type, n_paths=50000
+            )
+            
+            results['jump_diffusion'] = {
+                'analytical_price': jd_analytical_price,
+                'monte_carlo_price': jd_mc_price,
+                'monte_carlo_ci': jd_mc_ci,
+                'parameters': asdict(jump_params)
+            }
         
-        # Overall performance summary
-        benchmark_results['summary'] = {
-            'fastest_method': min(benchmark_results.keys(), 
-                                key=lambda x: benchmark_results[x]['avg_time_ms']),
-            'total_benchmark_time': sum(res['avg_time_ms'] * res['iterations'] 
-                                      for res in benchmark_results.values() if 'avg_time_ms' in res) / 1000,
-            'benchmark_timestamp': pd.Timestamp.now()
-        }
+        # Finite difference pricing
+        print("Computing finite difference pricing...")
+        start_time = time.perf_counter()
+        fd_price, _, _ = self.fd_pricer.implicit_fd_vanilla(
+            market_data, option_type, S_max=2*market_data.S0, M=100, N=500
+        )
+        fd_time = time.perf_counter() - start_time
+        self._pricing_times['finite_difference'].append(fd_time)
+        results['pricing_times']['finite_difference'] = fd_time
         
-        return benchmark_results
+        results['finite_difference'] = {'price': fd_price}
+        
+        # Store results
+        self.results_history.append(results)
+        
+        return results
     
     def generate_report(self, results: Dict[str, Any]) -> str:
         """
@@ -320,364 +360,7 @@ class DerivativesPricingEngine:
         except Exception:
             validation_results['exotic_options'] = False
         
-        return validation_results pricing and Greeks
-        print("Computing Black-Scholes pricing...")
-        start_time = time.perf_counter()
-        
-        bs_price = self.bs_model.price(market_data, option_type)
-        bs_greeks = self.bs_model.greeks(market_data, option_type)
-        
-        bs_time = time.perf_counter() - start_time
-        self._pricing_times['black_scholes'].append(bs_time)
-        
-        results['black_scholes'] = {
-            'price': bs_price,
-            'greeks': bs_greeks
-        }
-        results['pricing_times']['black_scholes'] = bs_time
-        
-        # Heston model pricing (if parameters provided)
-        if heston_params:
-            print("Computing Heston stochastic volatility pricing...")
-            heston_model = HestonModel(heston_params)
-            
-            # FFT pricing
-            start_time = time.perf_counter()
-            try:
-                heston_fft_price = heston_model.price_fft(market_data, option_type)
-                fft_time = time.perf_counter() - start_time
-                self._pricing_times['heston_fft'].append(fft_time)
-                results['pricing_times']['heston_fft'] = fft_time
-            except Exception as e:
-                print(f"FFT pricing failed: {e}")
-                heston_fft_price = None
-                fft_time = None
-            
-            # Monte Carlo pricing
-            start_time = time.perf_counter()
-            heston_mc_price, heston_mc_ci = heston_model.monte_carlo_price(
-                market_data, option_type, n_paths=50000
-            )
-            mc_time = time.perf_counter() - start_time
-            self._pricing_times['heston_mc'].append(mc_time)
-            results['pricing_times']['heston_mc'] = mc_time
-            
-            results['heston'] = {
-                'fft_price': heston_fft_price,
-                'monte_carlo_price': heston_mc_price,
-                'monte_carlo_ci': heston_mc_ci,
-                'parameters': asdict(heston_params)
-            }
-        
-        # Jump-diffusion model pricing (if parameters provided)
-        if jump_params:
-            print("Computing Merton jump-diffusion pricing...")
-            jd_model = MertonJumpDiffusionModel(jump_params)
-            
-            # Analytical pricing
-            start_time = time.perf_counter()
-            jd_analytical_price = jd_model.price_analytical(market_data, option_type)
-            analytical_time = time.perf_counter() - start_time
-            self._pricing_times['jump_diffusion'].append(analytical_time)
-            results['pricing_times']['jump_diffusion'] = analytical_time
-            
-            # Monte Carlo pricing
-            jd_mc_price, jd_mc_ci = jd_model.monte_carlo_price(
-                market_data, option_type, n_paths=50000
-            )
-            
-            results['jump_diffusion'] = {
-                'analytical_price': jd_analytical_price,
-                'monte_carlo_price': jd_mc_price,
-                'monte_carlo_ci': jd_mc_ci,
-                'parameters': asdict(jump_params)
-            }
-        
-        # Finite difference pricing
-        print("Computing finite difference pricing...")
-        start_time = time.perf_counter()
-        fd_price, _, _ = self.fd_pricer.implicit_fd_vanilla(
-            market_data, option_type, S_max=2*market_data.S0, M=100, N=500
-        )
-        fd_time = time.perf_counter() - start_time
-        self._pricing_times['finite_difference'].append(fd_time)
-        results['pricing_times']['finite_difference'] = fd_time
-        
-        results['finite_difference'] = {'price': fd_price}
-        
-        # Store results
-        self.results_history.append(results)
-        
-        return results
-    
-    def price_exotic_options(self, market_data: MarketData) -> Dict[str, Any]:
-        """
-        Price various exotic options using Monte Carlo simulation.
-        
-        Args:
-            market_data: Market conditions
-            
-        Returns:
-            Dictionary with exotic option prices and confidence intervals
-        """
-        print("Computing exotic option prices...")
-        
-        exotic_results = {}
-        
-        # Barrier options
-        barrier_configs = [
-            ('up_out_call', OptionType.CALL, 'up_out', market_data.S0 * 1.2),
-            ('down_out_put', OptionType.PUT, 'down_out', market_data.S0 * 0.8),
-            ('up_in_call', OptionType.CALL, 'up_in', market_data.S0 * 1.15)
-        ]
-        
-        for name, opt_type, barrier_type, barrier_level in barrier_configs:
-            price, ci = self.exotic_engine.barrier_option_mc(
-                market_data, opt_type, barrier_type, barrier_level, n_paths=50000
-            )
-            exotic_results[name] = {
-                'price': price,
-                'confidence_interval': ci,
-                'barrier_level': barrier_level,
-                'barrier_type': barrier_type
-            }
-        
-        # Asian options
-        asian_configs = [
-            ('asian_call_arithmetic', OptionType.CALL, 'arithmetic'),
-            ('asian_put_arithmetic', OptionType.PUT, 'arithmetic'),
-            ('asian_call_geometric', OptionType.CALL, 'geometric')
-        ]
-        
-        for name, opt_type, avg_type in asian_configs:
-            price, ci = self.exotic_engine.asian_option_mc(
-                market_data, opt_type, avg_type, n_paths=50000
-            )
-            exotic_results[name] = {
-                'price': price,
-                'confidence_interval': ci,
-                'average_type': avg_type
-            }
-        
-        # Lookback options
-        lookback_configs = [
-            ('lookback_call', 'lookback_call'),
-            ('lookback_put', 'lookback_put')
-        ]
-        
-        for name, lookback_type in lookback_configs:
-            price, ci = self.exotic_engine.lookback_option_mc(
-                market_data, lookback_type, n_paths=50000
-            )
-            exotic_results[name] = {
-                'price': price,
-                'confidence_interval': ci
-            }
-        
-        return exotic_results
-    
-    def portfolio_risk_analysis(
-        self, 
-        positions: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
-        """
-        Perform portfolio-level risk analysis.
-        
-        Args:
-            positions: List of position dictionaries with keys:
-                - 'market_data': MarketData object
-                - 'option_type': str ('call' or 'put')
-                - 'quantity': int (positive for long, negative for short)
-                
-        Returns:
-            Portfolio risk metrics including aggregated Greeks and VaR
-        """
-        print("Computing portfolio risk metrics...")
-        
-        portfolio_greeks = {'delta': 0, 'gamma': 0, 'theta': 0, 'vega': 0, 'rho': 0}
-        portfolio_value = 0
-        position_details = []
-        
-        for i, position in enumerate(positions):
-            market_data = position['market_data']
-            option_type = validate_option_type(position['option_type'])
-            quantity = position['quantity']
-            
-            # Calculate option price and Greeks
-            price = self.bs_model.price(market_data, option_type)
-            greeks = self.bs_model.greeks(market_data, option_type)
-            
-            # Scale by position size
-            position_value = price * quantity
-            portfolio_value += position_value
-            
-            position_detail = {
-                'position_id': i,
-                'strike': market_data.K,
-                'expiry': market_data.T,
-                'spot': market_data.S0,
-                'option_type': option_type,
-                'quantity': quantity,
-                'unit_price': price,
-                'total_value': position_value,
-                'greeks': {},
-                'percentage_of_portfolio': 0.0  # Will be calculated later
-            }
-            
-            # Aggregate Greeks
-            for greek_name, greek_value in greeks.items():
-                scaled_greek = greek_value * quantity
-                portfolio_greeks[greek_name] += scaled_greek
-                position_detail['greeks'][greek_name] = scaled_greek
-            
-            position_details.append(position_detail)
-        
-        # Calculate position percentages
-        for position in position_details:
-            if portfolio_value != 0:
-                position['percentage_of_portfolio'] = (
-                    position['total_value'] / portfolio_value * 100
-                )
-        
-        # Value at Risk (VaR) estimation using delta-normal method
-        confidence_levels = [0.95, 0.99]
-        holding_period = 1/252  # 1 day
-        
-        # Estimate portfolio volatility (simplified approach)
-        avg_spot = np.mean([pos['spot'] for pos in position_details])
-        portfolio_volatility = abs(portfolio_greeks['delta']) * 0.20 * np.sqrt(holding_period)
-        
-        var_estimates = {}
-        for conf_level in confidence_levels:
-            var_value = -stats.norm.ppf(1 - conf_level) * portfolio_volatility * avg_spot
-            var_estimates[f'var_{int(conf_level*100)}'] = var_value
-        
-        # Risk concentration analysis
-        risk_concentration = self._analyze_risk_concentration(position_details, portfolio_value)
-        
-        return {
-            'portfolio_value': portfolio_value,
-            'portfolio_greeks': portfolio_greeks,
-            'var_estimates': var_estimates,
-            'risk_concentration': risk_concentration,
-            'position_count': len(positions),
-            'position_details': position_details,
-            'analysis_timestamp': pd.Timestamp.now()
-        }
-    
-    def _analyze_risk_concentration(
-        self, 
-        position_details: List[Dict], 
-        portfolio_value: float
-    ) -> Dict[str, Any]:
-        """Analyze risk concentration in the portfolio."""
-        
-        if not position_details or portfolio_value == 0:
-            return {}
-        
-        # Concentration by option type
-        call_value = sum(pos['total_value'] for pos in position_details 
-                        if pos['option_type'] == OptionType.CALL)
-        put_value = sum(pos['total_value'] for pos in position_details 
-                       if pos['option_type'] == OptionType.PUT)
-        
-        # Concentration by expiry
-        expiry_groups = {}
-        for pos in position_details:
-            expiry_bucket = round(pos['expiry'], 2)  # Round to nearest 0.01 years
-            if expiry_bucket not in expiry_groups:
-                expiry_groups[expiry_bucket] = 0
-            expiry_groups[expiry_bucket] += pos['total_value']
-        
-        # Concentration by moneyness
-        moneyness_groups = {'deep_otm': 0, 'otm': 0, 'atm': 0, 'itm': 0, 'deep_itm': 0}
-        for pos in position_details:
-            moneyness = pos['spot'] / pos['strike']
-            if moneyness < 0.9:
-                bucket = 'deep_otm' if pos['option_type'] == OptionType.CALL else 'deep_itm'
-            elif moneyness < 0.95:
-                bucket = 'otm' if pos['option_type'] == OptionType.CALL else 'itm'
-            elif moneyness <= 1.05:
-                bucket = 'atm'
-            elif moneyness <= 1.1:
-                bucket = 'itm' if pos['option_type'] == OptionType.CALL else 'otm'
-            else:
-                bucket = 'deep_itm' if pos['option_type'] == OptionType.CALL else 'deep_otm'
-            
-            moneyness_groups[bucket] += pos['total_value']
-        
-        return {
-            'by_option_type': {
-                'call_percentage': (call_value / portfolio_value * 100) if portfolio_value else 0,
-                'put_percentage': (put_value / portfolio_value * 100) if portfolio_value else 0
-            },
-            'by_expiry': {k: (v / portfolio_value * 100) for k, v in expiry_groups.items()},
-            'by_moneyness': {k: (v / portfolio_value * 100) for k, v in moneyness_groups.items()},
-            'largest_position_percentage': max(
-                pos['percentage_of_portfolio'] for pos in position_details
-            ) if position_details else 0
-        }
-    
-    def sensitivity_analysis(
-        self,
-        market_data: MarketData,
-        option_type: str,
-        param_ranges: Dict[str, np.ndarray]
-    ) -> Dict[str, Any]:
-        """
-        Perform comprehensive sensitivity analysis.
-        
-        Args:
-            market_data: Base market conditions
-            option_type: 'call' or 'put'
-            param_ranges: Dictionary mapping parameter names to value arrays
-            
-        Returns:
-            Sensitivity analysis results
-        """
-        print("Running sensitivity analysis...")
-        option_type = validate_option_type(option_type)
-        
-        sensitivity_results = {}
-        base_price = self.bs_model.price(market_data, option_type)
-        base_greeks = self.bs_model.greeks(market_data, option_type)
-        
-        for param_name, param_values in param_ranges.items():
-            prices = []
-            deltas = []
-            vegas = []
-            
-            for value in param_values:
-                # Create modified market data
-                kwargs = {param_name: value}
-                modified_data = market_data.copy(**kwargs)
-                
-                try:
-                    price = self.bs_model.price(modified_data, option_type)
-                    greeks = self.bs_model.greeks(modified_data, option_type)
-                    
-                    prices.append(price)
-                    deltas.append(greeks['delta'])
-                    vegas.append(greeks['vega'])
-                    
-                except Exception as e:
-                    # Handle edge cases (e.g., negative time)
-                    prices.append(np.nan)
-                    deltas.append(np.nan)
-                    vegas.append(np.nan)
-            
-            sensitivity_results[param_name] = {
-                'values': param_values,
-                'prices': np.array(prices),
-                'deltas': np.array(deltas),
-                'vegas': np.array(vegas),
-                'base_price': base_price,
-                'base_greeks': base_greeks,
-                'price_range': (np.nanmin(prices), np.nanmax(prices)),
-                'max_price_change': np.nanmax(np.abs(np.array(prices) - base_price))
-            }
-        
-        return sensitivity_results
+        return validation_results
     
     def benchmark_performance(
         self,
@@ -701,4 +384,43 @@ class DerivativesPricingEngine:
         
         benchmark_results = {}
         
-        # Black-Scholes
+        # Black-Scholes pricing benchmark
+        start_time = time.perf_counter()
+        for _ in range(n_iterations):
+            _ = self.bs_model.price(market_data, option_type)
+        bs_time = (time.perf_counter() - start_time) / n_iterations * 1000  # ms
+        
+        benchmark_results['black_scholes_pricing'] = {
+            'avg_time_ms': bs_time,
+            'iterations': n_iterations,
+            'ops_per_second': 1000 / bs_time if bs_time > 0 else float('inf')
+        }
+        
+        # Greeks calculation benchmark
+        start_time = time.perf_counter()
+        for _ in range(n_iterations):
+            _ = self.bs_model.greeks(market_data, option_type)
+        greeks_time = (time.perf_counter() - start_time) / n_iterations * 1000  # ms
+        
+        benchmark_results['greeks_calculation'] = {
+            'avg_time_ms': greeks_time,
+            'iterations': n_iterations,
+            'ops_per_second': 1000 / greeks_time if greeks_time > 0 else float('inf')
+        }
+        
+        # Finite difference benchmark (fewer iterations due to computational cost)
+        fd_iterations = min(100, n_iterations)
+        start_time = time.perf_counter()
+        for _ in range(fd_iterations):
+            _ = self.fd_pricer.implicit_fd_vanilla(
+                market_data, option_type, S_max=2*market_data.S0, M=50, N=100
+            )
+        fd_time = (time.perf_counter() - start_time) / fd_iterations * 1000  # ms
+        
+        benchmark_results['finite_difference'] = {
+            'avg_time_ms': fd_time,
+            'iterations': fd_iterations,
+            'ops_per_second': 1000 / fd_time if fd_time > 0 else float('inf')
+        }
+        
+        return benchmark_results

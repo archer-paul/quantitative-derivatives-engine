@@ -47,27 +47,44 @@ class MarketData:
     
     def __post_init__(self):
         """Validate market data inputs after initialization."""
-        if self.S0 <= 0:
+        from .auto_diff import DualNumber
+        
+        # Extract real values for validation if DualNumber objects are used
+        S0_val = self.S0.real if isinstance(self.S0, DualNumber) else self.S0
+        K_val = self.K.real if isinstance(self.K, DualNumber) else self.K
+        T_val = self.T.real if isinstance(self.T, DualNumber) else self.T
+        sigma_val = self.sigma.real if isinstance(self.sigma, DualNumber) else self.sigma
+        q_val = self.q.real if isinstance(self.q, DualNumber) else self.q
+        
+        if S0_val <= 0:
             raise ValueError("Stock price S0 must be positive")
-        if self.K <= 0:
+        if K_val <= 0:
             raise ValueError("Strike price K must be positive")
-        if self.T < 0:
+        if T_val < 0:
             raise ValueError("Time to expiration T must be non-negative")
-        if self.sigma < 0:
+        if sigma_val < 0:
             raise ValueError("Volatility sigma must be non-negative")
-        if self.q < 0:
+        if q_val < 0:
             raise ValueError("Dividend yield q must be non-negative")
     
     @property
     def moneyness(self) -> float:
         """Calculate the moneyness (S0/K) of the option."""
-        return self.S0 / self.K
+        from .auto_diff import DualNumber
+        S0_val = self.S0.real if isinstance(self.S0, DualNumber) else self.S0
+        K_val = self.K.real if isinstance(self.K, DualNumber) else self.K
+        return S0_val / K_val
     
     @property 
     def forward_price(self) -> float:
         """Calculate the forward price of the underlying asset."""
         import math
-        return self.S0 * math.exp((self.r - self.q) * self.T)
+        from .auto_diff import DualNumber
+        S0_val = self.S0.real if isinstance(self.S0, DualNumber) else self.S0
+        r_val = self.r.real if isinstance(self.r, DualNumber) else self.r
+        q_val = self.q.real if isinstance(self.q, DualNumber) else self.q
+        T_val = self.T.real if isinstance(self.T, DualNumber) else self.T
+        return S0_val * math.exp((r_val - q_val) * T_val)
     
     def is_itm(self, option_type: str) -> bool:
         """
@@ -79,10 +96,14 @@ class MarketData:
         Returns:
             bool: True if option is in-the-money
         """
+        from .auto_diff import DualNumber
+        S0_val = self.S0.real if isinstance(self.S0, DualNumber) else self.S0
+        K_val = self.K.real if isinstance(self.K, DualNumber) else self.K
+        
         if option_type == OptionType.CALL:
-            return self.S0 > self.K
+            return S0_val > K_val
         elif option_type == OptionType.PUT:
-            return self.S0 < self.K
+            return S0_val < K_val
         else:
             raise ValueError(f"Invalid option type: {option_type}")
     

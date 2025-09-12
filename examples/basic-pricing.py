@@ -48,7 +48,7 @@ def main():
     print(f"  Time to Expiry (T):   {market_data.T:.3f} years")
     print(f"  Risk-free Rate (r):   {market_data.r:.2%}")
     print(f"  Dividend Yield (q):   {market_data.q:.2%}")
-    print(f"  Volatility (σ):       {market_data.sigma:.2%}")
+    print(f"  Volatility (sigma):   {market_data.sigma:.2%}")
     print(f"  Moneyness (S0/K):     {market_data.moneyness:.3f}")
     print()
     
@@ -56,16 +56,17 @@ def main():
     print("BLACK-SCHOLES PRICING:")
     print("-" * 30)
     
-    call_price = engine.bs_model.price(market_data, OptionType.CALL)
-    put_price = engine.bs_model.price(market_data, OptionType.PUT)
+    call_price = engine.bs_model.price(market_data, "call")
+    put_price = engine.bs_model.price(market_data, "put")
     
     print(f"Call Option Price:     ${call_price:.4f}")
     print(f"Put Option Price:      ${put_price:.4f}")
     
     # Verify put-call parity
-    forward_price = market_data.forward_price
+    import numpy as np
     pcp_left = call_price - put_price
-    pcp_right = forward_price - market_data.K * (1 + market_data.r) ** (-market_data.T)
+    pcp_right = (market_data.S0 * np.exp(-market_data.q * market_data.T) - 
+                market_data.K * np.exp(-market_data.r * market_data.T))
     
     print(f"\nPut-Call Parity Check:")
     print(f"  C - P = ${pcp_left:.6f}")
@@ -77,23 +78,23 @@ def main():
     print("GREEKS ANALYSIS (Call Option):")
     print("-" * 35)
     
-    call_greeks = engine.bs_model.greeks(market_data, OptionType.CALL)
+    call_greeks = engine.bs_model.greeks(market_data, "call")
     
-    print(f"Delta (Δ):             {call_greeks['delta']:>8.4f}")
-    print(f"Gamma (Γ):             {call_greeks['gamma']:>8.4f}")
-    print(f"Theta (Θ):             {call_greeks['theta']:>8.4f}")
-    print(f"Vega (ν):              {call_greeks['vega']:>8.4f}")
-    print(f"Rho (ρ):               {call_greeks['rho']:>8.4f}")
+    print(f"Delta:                 {call_greeks['delta']:>8.4f}")
+    print(f"Gamma:                 {call_greeks['gamma']:>8.4f}")
+    print(f"Theta:                 {call_greeks['theta']:>8.4f}")
+    print(f"Vega:                  {call_greeks['vega']:>8.4f}")
+    print(f"Rho:                   {call_greeks['rho']:>8.4f}")
     print()
     
     # Interpret the Greeks
     print("GREEKS INTERPRETATION:")
     print("-" * 25)
-    print(f"• For a $1 increase in stock price, call value changes by ${call_greeks['delta']:.4f}")
-    print(f"• Delta changes by {call_greeks['gamma']:.4f} for each $1 stock move")
-    print(f"• Option loses ${-call_greeks['theta']:.4f} in value per day (time decay)")
-    print(f"• For 1% increase in volatility, call value increases by ${call_greeks['vega']:.4f}")
-    print(f"• For 1% increase in interest rate, call value increases by ${call_greeks['rho']:.4f}")
+    print(f"- For a $1 increase in stock price, call value changes by ${call_greeks['delta']:.4f}")
+    print(f"- Delta changes by {call_greeks['gamma']:.4f} for each $1 stock move")
+    print(f"- Option loses ${-call_greeks['theta']:.4f} in value per day (time decay)")
+    print(f"- For 1% increase in volatility, call value increases by ${call_greeks['vega']:.4f}")
+    print(f"- For 1% increase in interest rate, call value increases by ${call_greeks['rho']:.4f}")
     print()
     
     # Sensitivity analysis
@@ -111,7 +112,7 @@ def main():
     base_call_price = call_price
     
     for scenario_name, scenario_market in scenarios:
-        scenario_price = engine.bs_model.price(scenario_market, OptionType.CALL)
+        scenario_price = engine.bs_model.price(scenario_market, "call")
         price_change = scenario_price - base_call_price
         percent_change = (price_change / base_call_price) * 100
         
@@ -119,7 +120,7 @@ def main():
               f"(${price_change:+7.4f}, {percent_change:+6.2f}%)")
     
     print()
-    print("✅ Basic pricing example completed successfully!")
+    print("=> Basic pricing example completed successfully!")
     
 
 if __name__ == "__main__":

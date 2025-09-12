@@ -37,7 +37,9 @@ class BlackScholesModel:
         Returns:
             Tuple of (d1, d2)
         """
-        if isinstance(T, (int, float)) and T <= 0:
+        from ..core.auto_diff import DualNumber
+        T_val = T.real if isinstance(T, DualNumber) else T
+        if T_val <= 0:
             # Handle expiration case
             if isinstance(S, DualNumber):
                 return DualNumber(0.0, 0.0), DualNumber(0.0, 0.0)
@@ -75,11 +77,15 @@ class BlackScholesModel:
         )
         
         # Handle expiration case
-        if T <= 0:
+        from ..core.auto_diff import DualNumber
+        T_val = T.real if isinstance(T, DualNumber) else T
+        if T_val <= 0:
+            S_val = S.real if isinstance(S, DualNumber) else S
+            K_val = K.real if isinstance(K, DualNumber) else K
             if option_type == OptionType.CALL:
-                return max(S - K, 0)
+                return max(S_val - K_val, 0)
             else:
-                return max(K - S, 0)
+                return max(K_val - S_val, 0)
         
         # Calculate d1 and d2
         d1, d2 = BlackScholesModel._d1_d2(S, K, T, r, q, sigma)
@@ -122,11 +128,15 @@ class BlackScholesModel:
         )
         
         # Handle expiration case
-        if T <= 0:
+        from ..core.auto_diff import DualNumber
+        T_val = T.real if isinstance(T, DualNumber) else T
+        if T_val <= 0:
+            S_val = S.real if isinstance(S, DualNumber) else S
+            K_val = K.real if isinstance(K, DualNumber) else K
             if option_type == OptionType.CALL:
-                delta = 1.0 if S > K else (0.5 if S == K else 0.0)
+                delta = 1.0 if S_val > K_val else (0.5 if S_val == K_val else 0.0)
             else:  # PUT
-                delta = -1.0 if S < K else (-0.5 if S == K else 0.0)
+                delta = -1.0 if S_val < K_val else (-0.5 if S_val == K_val else 0.0)
             
             return {
                 'delta': delta,
