@@ -1,0 +1,291 @@
+# Makefile for Quantitative Derivatives Engine
+
+# Variables
+PYTHON := python
+PIP := pip
+PYTEST := pytest
+BLACK := black
+FLAKE8 := flake8
+MYPY := mypy
+PACKAGE_NAME := derivatives_engine
+TEST_DIR := tests
+DOCS_DIR := docs
+
+# Colors for output
+RED := \033[0;31m
+GREEN := \033[0;32m
+YELLOW := \033[1;33m
+NC := \033[0m # No Color
+
+.PHONY: help install install-dev install-all clean lint format type-check test test-cov test-performance docs docs-serve build upload-test upload dist check-dist setup-dev benchmark example
+
+help: ## Show this help message
+	@echo "$(GREEN)Quantitative Derivatives Engine - Makefile Commands$(NC)"
+	@echo "=================================================="
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "$(YELLOW)%-20s$(NC) %s\n", $$1, $$2}'
+
+# Installation targets
+install: ## Install package in production mode
+	@echo "$(GREEN)Installing package...$(NC)"
+	$(PIP) install -e .
+
+install-dev: ## Install package in development mode with dev dependencies
+	@echo "$(GREEN)Installing package in development mode...$(NC)"
+	$(PIP) install -e .[dev]
+	pre-commit install
+
+install-all: ## Install package with all optional dependencies
+	@echo "$(GREEN)Installing package with all dependencies...$(NC)"
+	$(PIP) install -e .[all]
+	pre-commit install
+
+setup-dev: install-dev ## Set up complete development environment
+	@echo "$(GREEN)Development environment ready!$(NC)"
+
+# Code quality targets
+format: ## Format code with black and isort
+	@echo "$(GREEN)Formatting code...$(NC)"
+	$(BLACK) $(PACKAGE_NAME) $(TEST_DIR) examples/
+	isort $(PACKAGE_NAME) $(TEST_DIR) examples/
+
+lint: ## Run flake8 linter
+	@echo "$(GREEN)Running linter...$(NC)"
+	$(FLAKE8) $(PACKAGE_NAME) $(TEST_DIR) examples/
+
+type-check: ## Run mypy type checker
+	@echo "$(GREEN)Running type checker...$(NC)"
+	$(MYPY) $(PACKAGE_NAME) --ignore-missing-imports
+
+check: format lint type-check ## Run all code quality checks
+
+# Testing targets
+test: ## Run unit tests
+	@echo "$(GREEN)Running tests...$(NC)"
+	$(PYTEST) $(TEST_DIR)/ -v
+
+test-cov: ## Run tests with coverage report
+	@echo "$(GREEN)Running tests with coverage...$(NC)"
+	$(PYTEST) $(TEST_DIR)/ -v --cov=$(PACKAGE_NAME) --cov-report=html --cov-report=term-missing
+
+test-performance: ## Run performance benchmarks
+	@echo "$(GREEN)Running performance tests...$(NC)"
+	$(PYTEST) $(TEST_DIR)/ -v -m "performance"
+
+test-fast: ## Run fast tests only (skip slow integration tests)
+	@echo "$(GREEN)Running fast tests...$(NC)"
+	$(PYTEST) $(TEST_DIR)/ -v -m "not slow"
+
+test-all: test-cov test-performance ## Run all tests including coverage and performance
+
+# Documentation targets
+docs: ## Build documentation
+	@echo "$(GREEN)Building documentation...$(NC)"
+	cd $(DOCS_DIR) && make html
+
+docs-serve: docs ## Build and serve documentation locally
+	@echo "$(GREEN)Serving documentation at http://localhost:8000$(NC)"
+	cd $(DOCS_DIR)/_build/html && $(PYTHON) -m http.server 8000
+
+docs-clean: ## Clean documentation build files
+	@echo "$(GREEN)Cleaning documentation...$(NC)"
+	cd $(DOCS_DIR) && make clean
+
+# Build and distribution targets
+clean: ## Clean build artifacts and cache files
+	@echo "$(GREEN)Cleaning build artifacts...$(NC)"
+	rm -rf build/
+	rm -rf dist/
+	rm -rf *.egg-info/
+	rm -rf .pytest_cache/
+	rm -rf .mypy_cache/
+	rm -rf .coverage
+	rm -rf htmlcov/
+	find . -type d -name __pycache__ -exec rm -rf {} +
+	find . -type f -name "*.pyc" -delete
+
+build: clean ## Build distribution packages
+	@echo "$(GREEN)Building distribution packages...$(NC)"
+	$(PYTHON) -m build
+
+check-dist: build ## Check distribution packages
+	@echo "$(GREEN)Checking distribution packages...$(NC)"
+	$(PYTHON) -m twine check dist/*
+
+upload-test: check-dist ## Upload to test PyPI
+	@echo "$(GREEN)Uploading to test PyPI...$(NC)"
+	$(PYTHON) -m twine upload --repository testpypi dist/*
+
+upload: check-dist ## Upload to PyPI (production)
+	@echo "$(YELLOW)WARNING: This will upload to production PyPI!$(NC)"
+	@read -p "Are you sure? [y/N] " -n 1 -r; \
+	echo; \
+	if [[ $REPLY =~ ^[Yy]$ ]]; then \
+		echo "$(GREEN)Uploading to PyPI...$(NC)"; \
+		$(PYTHON) -m twine upload dist/*; \
+	else \
+		echo "$(RED)Upload cancelled.$(NC)"; \
+	fi
+
+# Development and testing utilities
+benchmark: ## Run performance benchmarks
+	@echo "$(GREEN)Running performance benchmarks...$(NC)"
+	$(PYTHON) -c "
+import time
+from derivatives_engine import DerivativesPricingEngine, MarketData, OptionType
+
+print('Performance Benchmark Results')
+print('=' * 40)
+
+engine = DerivativesPricingEngine()
+market = MarketData(S0=100, K=105, T=0.25, r=0.05, sigma=0.2)
+
+# Black-Scholes pricing benchmark
+iterations = 10000
+start_time = time.perf_counter()
+for _ in range(iterations):
+    price = engine.bs_model.price(market, OptionType.CALL)
+end_time = time.perf_counter()
+
+avg_time_us = (end_time - start_time) / iterations * 1000000
+print(f'Black-Scholes pricing: {avg_time_us:.1f} μs per call')
+
+# Greeks calculation benchmark
+start_time = time.perf_counter()
+for _ in range(iterations):
+    greeks = engine.bs_model.greeks(market, OptionType.CALL)
+end_time = time.perf_counter()
+
+avg_time_us = (end_time - start_time) / iterations * 1000000
+print(f'Greeks calculation: {avg_time_us:.1f} μs per call')
+
+print('✅ Benchmark completed successfully!')
+"
+
+example: ## Run basic example
+	@echo "$(GREEN)Running basic example...$(NC)"
+	$(PYTHON) examples/basic_pricing.py
+
+example-all: ## Run all examples
+	@echo "$(GREEN)Running all examples...$(NC)"
+	@for example in examples/*.py; do \
+		echo "$(YELLOW)Running $example...$(NC)"; \
+		$(PYTHON) $example; \
+		echo; \
+	done
+
+# Git and release utilities
+tag: ## Create a new git tag (usage: make tag VERSION=1.0.0)
+	@if [ -z "$(VERSION)" ]; then \
+		echo "$(RED)ERROR: VERSION is required. Usage: make tag VERSION=1.0.0$(NC)"; \
+		exit 1; \
+	fi
+	@echo "$(GREEN)Creating tag v$(VERSION)...$(NC)"
+	git tag -a v$(VERSION) -m "Release version $(VERSION)"
+	git push origin v$(VERSION)
+
+release-check: ## Check if ready for release
+	@echo "$(GREEN)Checking release readiness...$(NC)"
+	@echo "$(YELLOW)Running full test suite...$(NC)"
+	$(MAKE) test-all
+	@echo "$(YELLOW)Checking code quality...$(NC)"
+	$(MAKE) check
+	@echo "$(YELLOW)Building and checking distribution...$(NC)"
+	$(MAKE) check-dist
+	@echo "$(GREEN)✅ Ready for release!$(NC)"
+
+# Development workflow shortcuts
+dev-setup: clean install-dev ## Complete development setup
+	@echo "$(GREEN)Development environment is ready!$(NC)"
+	@echo "$(YELLOW)Next steps:$(NC)"
+	@echo "  1. Run 'make test' to verify installation"
+	@echo "  2. Run 'make example' to see the engine in action"
+	@echo "  3. Start developing and use 'make check' before committing"
+
+quick-test: format lint test-fast ## Quick development cycle: format, lint, and fast tests
+
+full-check: format lint type-check test-cov ## Full check before committing
+
+pre-commit: full-check ## Run all checks before committing
+	@echo "$(GREEN)✅ All checks passed! Ready to commit.$(NC)"
+
+# Continuous Integration simulation
+ci: ## Simulate CI pipeline locally
+	@echo "$(GREEN)Simulating CI pipeline...$(NC)"
+	$(MAKE) clean
+	$(MAKE) install-dev
+	$(MAKE) check
+	$(MAKE) test-all
+	$(MAKE) build
+	@echo "$(GREEN)✅ CI simulation completed successfully!$(NC)"
+
+# Security and dependency checks
+security-check: ## Run security checks
+	@echo "$(GREEN)Running security checks...$(NC)"
+	safety check
+	bandit -r $(PACKAGE_NAME)/
+
+update-deps: ## Update dependencies
+	@echo "$(GREEN)Updating dependencies...$(NC)"
+	$(PIP) install --upgrade pip setuptools wheel
+	$(PIP) install --upgrade -e .[dev]
+
+# Docker targets (if using Docker)
+docker-build: ## Build Docker image
+	@echo "$(GREEN)Building Docker image...$(NC)"
+	docker build -t quantitative-derivatives-engine .
+
+docker-test: ## Run tests in Docker
+	@echo "$(GREEN)Running tests in Docker...$(NC)"
+	docker run --rm quantitative-derivatives-engine make test
+
+# Profiling and debugging
+profile: ## Run profiling on performance-critical code
+	@echo "$(GREEN)Running profiler...$(NC)"
+	$(PYTHON) -m cProfile -s cumtime -c "
+from derivatives_engine import DerivativesPricingEngine, MarketData, OptionType
+engine = DerivativesPricingEngine()
+market = MarketData(S0=100, K=105, T=0.25, r=0.05, sigma=0.2)
+for _ in range(1000):
+    price = engine.bs_model.price(market, OptionType.CALL)
+    greeks = engine.bs_model.greeks(market, OptionType.CALL)
+"
+
+memory-profile: ## Run memory profiling
+	@echo "$(GREEN)Running memory profiler...$(NC)"
+	$(PYTHON) -m memory_profiler examples/basic_pricing.py
+
+# Information targets
+info: ## Show project information
+	@echo "$(GREEN)Project Information$(NC)"
+	@echo "==================="
+	@echo "Package: $(PACKAGE_NAME)"
+	@echo "Python: $($(PYTHON) --version)"
+	@echo "Pip: $($(PIP) --version)"
+	@echo "Git: $(git --version)"
+	@echo ""
+	@echo "$(GREEN)Package Status$(NC)"
+	@echo "=============="
+	@$(PYTHON) -c "
+import derivatives_engine
+print(f'Version: {derivatives_engine.__version__}')
+print(f'Author: {derivatives_engine.__author__}')
+print(f'License: {derivatives_engine.__license__}')
+" 2>/dev/null || echo "Package not installed"
+
+env-info: ## Show environment information
+	@echo "$(GREEN)Environment Information$(NC)"
+	@echo "======================="
+	@echo "Python executable: $(which $(PYTHON))"
+	@echo "Python version: $($(PYTHON) --version)"
+	@echo "Virtual environment: ${VIRTUAL_ENV:-Not in virtual environment}"
+	@echo "Working directory: $(pwd)"
+	@echo ""
+	@echo "$(GREEN)Installed Packages$(NC)"
+	@echo "=================="
+	@$(PIP) list | grep -E "(numpy|scipy|pandas|matplotlib)" || echo "Core packages not found"
+
+# Default target
+all: clean install-dev check test-cov docs build ## Run complete build pipeline
+
+# Make sure these targets run even if files with same names exist
+.PHONY: $(MAKECMDGOALS)

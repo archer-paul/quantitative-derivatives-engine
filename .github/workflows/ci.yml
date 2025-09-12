@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.8, 3.9, "3.10", "3.11"]
+
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -e .[dev]
+    
+    - name: Lint with flake8
+      run: |
+        # Stop the build if there are Python syntax errors or undefined names
+        flake8 derivatives_engine --count --select=E9,F63,F7,F82 --show-source --statistics
+        # Exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
+        flake8 derivatives_engine --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+    
+    - name: Format check with black
+      run: |
+        black --check derivatives_engine tests
+    
+    - name: Type check with mypy
+      run: |
+        mypy derivatives_engine --ignore-missing-imports
+    
+    - name: Test with pytest
+      run: |
+        pytest tests/ -v --cov=derivatives_engine --cov-report=xml
+    
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+
+  performance-test:
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python 3.9
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.9
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -e .
+    
+    - name: Run performance benchmarks
+      run: |
+        python -c "
+        from derivatives_engine import DerivativesPricingEngine, MarketData, OptionType
+        import time
+        
+        engine = DerivativesPricingEngine()
+        market = MarketData(S0=100, K=105, T=0.25, r=0.05, sigma=0.2)
+        
+        # Performance test
+        start_time = time.perf_counter()
+        for _ in range(1000):
+            price = engine.bs_model.price(market, OptionType.CALL)
+        end_time = time.perf_counter()
+        
+        avg_time_ms = (end_time - start_time) / 1000 * 1000
+        print(f'Average pricing time: {avg_time_ms:.3f} ms')
+        
+        # Assert performance requirement
+        assert avg_time_ms < 1.0, f'Pricing too slow: {avg_time_ms:.3f} ms > 1.0 ms'
+        print('✅ Performance test passed')
+        "
