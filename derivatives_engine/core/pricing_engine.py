@@ -1,0 +1,704 @@
+"""
+Main pricing engine that orchestrates all pricing models and analysis.
+
+This module provides the central DerivativesPricingEngine class that coordinates
+pricing across different models and provides portfolio-level analysis.
+"""
+
+import time
+import numpy as np
+import pandas as pd
+from typing import Dict, List, Optional, Tuple, Any
+from dataclasses import asdict
+
+from .market_data import MarketData, OptionType, validate_option_type
+from ..models.black_scholes import BlackScholesModel
+from ..models.heston import HestonModel, HestonParameters
+from ..models.jump_diffusion import MertonJumpDiffusionModel, JumpDiffusionParameters
+from ..models.finite_difference import FiniteDifferencePricer
+from ..exotic.exotic_engine import ExoticOptions
+
+
+class DerivativesPricingEngine:
+    """
+    Main pricing engine orchestrating all models and analysis.
+    
+    This class provides a unified interface for pricing options using multiple
+    models, calculating Greeks, performing portfolio analysis, and running
+    sensitivity studies.
+    """
+    
+    def __init__(self):
+        """Initialize the pricing engine with all models."""
+        self.bs_model = BlackScholesModel()
+        self.fd_pricer = FiniteDifferencePricer()
+        self.exotic_engine = ExoticOptions()
+        self.results_history: List[Dict] = []
+        
+        # Performance tracking
+        self._pricing_times: Dict[str, List[float]] = {
+            'black_scholes': [],
+            'heston_fft': [],
+            'heston_mc': [],
+            'jump_diffusion': [],
+            'finite_difference': []
+        }
+    
+    def comprehensive_pricing(
+        self,
+        market_data: MarketData,
+        option_type: str,
+        heston_params: Optional[HestonParameters] = None,
+        jump_params: Optional[JumpDiffusionParameters] = None
+    ) -> Dict[str, Any]:
+        """
+        Perform comprehensive pricing using all available models.
+        
+        Args:
+            market_data: Market conditions and option parameters
+            option_type: 'call' or 'put'
+            heston_params: Optional Heston model parameters
+            jump_params: Optional jump-diffusion parameters
+            
+        Returns:
+            Dictionary containing results from all models
+        """
+        option_type = validate_option_type(option_type)
+        
+        results = {
+            'market_data': market_data,
+            'option_type': option_type,
+            'timestamp': pd.Timestamp.now(),
+            'pricing_times': {}
+        }
+        
+        # Black-Scholes pricing benchmark
+        start_time = time.perf_counter()
+        for _ in range(n_iterations):
+            _ = self.bs_model.price(market_data, option_type)
+        bs_time = (time.perf_counter() - start_time) / n_iterations * 1000  # ms
+        
+        benchmark_results['black_scholes_pricing'] = {
+            'avg_time_ms': bs_time,
+            'iterations': n_iterations,
+            'ops_per_second': 1000 / bs_time if bs_time > 0 else float('inf')
+        }
+        
+        # Greeks calculation benchmark
+        start_time = time.perf_counter()
+        for _ in range(n_iterations):
+            _ = self.bs_model.greeks(market_data, option_type)
+        greeks_time = (time.perf_counter() - start_time) / n_iterations * 1000  # ms
+        
+        benchmark_results['greeks_calculation'] = {
+            'avg_time_ms': greeks_time,
+            'iterations': n_iterations,
+            'ops_per_second': 1000 / greeks_time if greeks_time > 0 else float('inf')
+        }
+        
+        # Finite difference benchmark (fewer iterations due to computational cost)
+        fd_iterations = min(100, n_iterations)
+        start_time = time.perf_counter()
+        for _ in range(fd_iterations):
+            _ = self.fd_pricer.implicit_fd_vanilla(
+                market_data, option_type, S_max=2*market_data.S0, M=50, N=100
+            )
+        fd_time = (time.perf_counter() - start_time) / fd_iterations * 1000  # ms
+        
+        benchmark_results['finite_difference'] = {
+            'avg_time_ms': fd_time,
+            'iterations': fd_iterations,
+            'ops_per_second': 1000 / fd_time if fd_time > 0 else float('inf')
+        }
+        
+        # Overall performance summary
+        benchmark_results['summary'] = {
+            'fastest_method': min(benchmark_results.keys(), 
+                                key=lambda x: benchmark_results[x]['avg_time_ms']),
+            'total_benchmark_time': sum(res['avg_time_ms'] * res['iterations'] 
+                                      for res in benchmark_results.values() if 'avg_time_ms' in res) / 1000,
+            'benchmark_timestamp': pd.Timestamp.now()
+        }
+        
+        return benchmark_results
+    
+    def generate_report(self, results: Dict[str, Any]) -> str:
+        """
+        Generate comprehensive pricing report.
+        
+        Args:
+            results: Results dictionary from comprehensive_pricing
+            
+        Returns:
+            Formatted report string
+        """
+        report = []
+        report.append("=" * 80)
+        report.append("ADVANCED DERIVATIVES PRICING ENGINE - COMPREHENSIVE REPORT")
+        report.append("=" * 80)
+        report.append(f"Generated: {results['timestamp']}")
+        report.append(f"Option Type: {results['option_type'].upper()}")
+        report.append("")
+        
+        # Market data
+        md = results['market_data']
+        report.append("MARKET DATA:")
+        report.append(f"  Spot Price (S0):      ${md.S0:,.2f}")
+        report.append(f"  Strike Price (K):     ${md.K:,.2f}")
+        report.append(f"  Time to Expiry (T):   {md.T:.4f} years")
+        report.append(f"  Risk-free Rate (r):   {md.r:.4%}")
+        report.append(f"  Dividend Yield (q):   {md.q:.4%}")
+        report.append(f"  Volatility (σ):       {md.sigma:.4%}")
+        report.append(f"  Moneyness (S0/K):     {md.moneyness:.3f}")
+        report.append(f"  Forward Price:        ${md.forward_price:,.2f}")
+        report.append("")
+        
+        # Black-Scholes results
+        bs = results['black_scholes']
+        report.append("BLACK-SCHOLES MODEL:")
+        report.append("-" * 30)
+        report.append(f"  Option Price:         ${bs['price']:.4f}")
+        report.append("  Greeks:")
+        for greek_name, greek_value in bs['greeks'].items():
+            report.append(f"    {greek_name.capitalize():>8}: {greek_value:>10.6f}")
+        
+        if 'pricing_times' in results and 'black_scholes' in results['pricing_times']:
+            report.append(f"  Computation Time:     {results['pricing_times']['black_scholes']*1000:.3f} ms")
+        report.append("")
+        
+        # Heston model results
+        if 'heston' in results:
+            heston = results['heston']
+            report.append("HESTON STOCHASTIC VOLATILITY MODEL:")
+            report.append("-" * 40)
+            if heston['fft_price'] is not None:
+                report.append(f"  FFT Price:            ${heston['fft_price']:.4f}")
+            report.append(f"  Monte Carlo Price:    ${heston['monte_carlo_price']:.4f} ± {heston['monte_carlo_ci']:.4f}")
+            
+            # Model parameters
+            params = heston['parameters']
+            report.append("  Model Parameters:")
+            report.append(f"    v0 (initial var):   {params['v0']:.6f}")
+            report.append(f"    theta (long-term):  {params['theta']:.6f}")
+            report.append(f"    kappa (mean rev):   {params['kappa']:.4f}")
+            report.append(f"    sigma_v (vol vol):  {params['sigma_v']:.4f}")
+            report.append(f"    rho (correlation):  {params['rho']:.4f}")
+            report.append("")
+        
+        # Jump-diffusion results
+        if 'jump_diffusion' in results:
+            jd = results['jump_diffusion']
+            report.append("MERTON JUMP-DIFFUSION MODEL:")
+            report.append("-" * 35)
+            report.append(f"  Analytical Price:     ${jd['analytical_price']:.4f}")
+            report.append(f"  Monte Carlo Price:    ${jd['monte_carlo_price']:.4f} ± {jd['monte_carlo_ci']:.4f}")
+            
+            # Model parameters
+            params = jd['parameters']
+            report.append("  Model Parameters:")
+            report.append(f"    lambda (intensity): {params['lambda_j']:.4f}")
+            report.append(f"    mu_j (jump mean):   {params['mu_j']:.4f}")
+            report.append(f"    sigma_j (jump vol): {params['sigma_j']:.4f}")
+            report.append("")
+        
+        # Finite difference results
+        if 'finite_difference' in results:
+            fd = results['finite_difference']
+            report.append("FINITE DIFFERENCE METHOD:")
+            report.append("-" * 30)
+            report.append(f"  Numerical Price:      ${fd['price']:.4f}")
+            if 'pricing_times' in results and 'finite_difference' in results['pricing_times']:
+                report.append(f"  Computation Time:     {results['pricing_times']['finite_difference']*1000:.1f} ms")
+            report.append("")
+        
+        # Model comparison
+        report.append("MODEL COMPARISON:")
+        report.append("-" * 20)
+        bs_price = bs['price']
+        report.append(f"  Black-Scholes:        ${bs_price:.4f} (baseline)")
+        
+        if 'heston' in results:
+            heston_diff = results['heston']['monte_carlo_price'] - bs_price
+            heston_pct = (heston_diff / bs_price) * 100
+            report.append(f"  Heston Difference:    ${heston_diff:+.4f} ({heston_pct:+.2f}%)")
+        
+        if 'jump_diffusion' in results:
+            jd_diff = results['jump_diffusion']['analytical_price'] - bs_price
+            jd_pct = (jd_diff / bs_price) * 100
+            report.append(f"  Jump-Diff Difference: ${jd_diff:+.4f} ({jd_pct:+.2f}%)")
+        
+        if 'finite_difference' in results:
+            fd_diff = results['finite_difference']['price'] - bs_price
+            fd_pct = (fd_diff / bs_price) * 100
+            report.append(f"  Finite Diff Diff:     ${fd_diff:+.4f} ({fd_pct:+.2f}%)")
+        
+        # Performance summary
+        if 'pricing_times' in results:
+            report.append("")
+            report.append("PERFORMANCE SUMMARY:")
+            report.append("-" * 22)
+            for method, time_val in results['pricing_times'].items():
+                if time_val is not None:
+                    report.append(f"  {method.replace('_', ' ').title():20}: {time_val*1000:6.3f} ms")
+        
+        report.append("")
+        report.append("=" * 80)
+        
+        return "\n".join(report)
+    
+    def get_performance_summary(self) -> Dict[str, Any]:
+        """
+        Get summary of historical performance metrics.
+        
+        Returns:
+            Performance statistics across all historical pricing calls
+        """
+        summary = {}
+        
+        for method, times in self._pricing_times.items():
+            if times:
+                times_array = np.array(times) * 1000  # Convert to ms
+                summary[method] = {
+                    'count': len(times),
+                    'mean_ms': np.mean(times_array),
+                    'std_ms': np.std(times_array),
+                    'min_ms': np.min(times_array),
+                    'max_ms': np.max(times_array),
+                    'median_ms': np.median(times_array),
+                    'p95_ms': np.percentile(times_array, 95),
+                    'ops_per_second': 1000 / np.mean(times_array) if np.mean(times_array) > 0 else float('inf')
+                }
+        
+        return summary
+    
+    def clear_performance_history(self):
+        """Clear performance timing history."""
+        for method in self._pricing_times:
+            self._pricing_times[method].clear()
+    
+    def validate_models(self, market_data: MarketData) -> Dict[str, bool]:
+        """
+        Validate that all models produce reasonable results.
+        
+        Args:
+            market_data: Market conditions for validation
+            
+        Returns:
+            Dictionary indicating which models passed validation
+        """
+        validation_results = {}
+        
+        # Test Black-Scholes
+        try:
+            call_price = self.bs_model.price(market_data, OptionType.CALL)
+            put_price = self.bs_model.price(market_data, OptionType.PUT)
+            greeks = self.bs_model.greeks(market_data, OptionType.CALL)
+            
+            # Basic validation checks
+            validation_results['black_scholes'] = (
+                call_price > 0 and put_price > 0 and
+                0 <= greeks['delta'] <= 1 and
+                greeks['gamma'] >= 0 and
+                greeks['vega'] >= 0
+            )
+        except Exception:
+            validation_results['black_scholes'] = False
+        
+        # Test finite difference
+        try:
+            fd_price, _, _ = self.fd_pricer.implicit_fd_vanilla(market_data, OptionType.CALL)
+            validation_results['finite_difference'] = fd_price > 0
+        except Exception:
+            validation_results['finite_difference'] = False
+        
+        # Test exotic options
+        try:
+            barrier_price, _ = self.exotic_engine.barrier_option_mc(
+                market_data, OptionType.CALL, 'up_out', market_data.S0 * 1.2, n_paths=1000
+            )
+            validation_results['exotic_options'] = barrier_price >= 0
+        except Exception:
+            validation_results['exotic_options'] = False
+        
+        return validation_results pricing and Greeks
+        print("Computing Black-Scholes pricing...")
+        start_time = time.perf_counter()
+        
+        bs_price = self.bs_model.price(market_data, option_type)
+        bs_greeks = self.bs_model.greeks(market_data, option_type)
+        
+        bs_time = time.perf_counter() - start_time
+        self._pricing_times['black_scholes'].append(bs_time)
+        
+        results['black_scholes'] = {
+            'price': bs_price,
+            'greeks': bs_greeks
+        }
+        results['pricing_times']['black_scholes'] = bs_time
+        
+        # Heston model pricing (if parameters provided)
+        if heston_params:
+            print("Computing Heston stochastic volatility pricing...")
+            heston_model = HestonModel(heston_params)
+            
+            # FFT pricing
+            start_time = time.perf_counter()
+            try:
+                heston_fft_price = heston_model.price_fft(market_data, option_type)
+                fft_time = time.perf_counter() - start_time
+                self._pricing_times['heston_fft'].append(fft_time)
+                results['pricing_times']['heston_fft'] = fft_time
+            except Exception as e:
+                print(f"FFT pricing failed: {e}")
+                heston_fft_price = None
+                fft_time = None
+            
+            # Monte Carlo pricing
+            start_time = time.perf_counter()
+            heston_mc_price, heston_mc_ci = heston_model.monte_carlo_price(
+                market_data, option_type, n_paths=50000
+            )
+            mc_time = time.perf_counter() - start_time
+            self._pricing_times['heston_mc'].append(mc_time)
+            results['pricing_times']['heston_mc'] = mc_time
+            
+            results['heston'] = {
+                'fft_price': heston_fft_price,
+                'monte_carlo_price': heston_mc_price,
+                'monte_carlo_ci': heston_mc_ci,
+                'parameters': asdict(heston_params)
+            }
+        
+        # Jump-diffusion model pricing (if parameters provided)
+        if jump_params:
+            print("Computing Merton jump-diffusion pricing...")
+            jd_model = MertonJumpDiffusionModel(jump_params)
+            
+            # Analytical pricing
+            start_time = time.perf_counter()
+            jd_analytical_price = jd_model.price_analytical(market_data, option_type)
+            analytical_time = time.perf_counter() - start_time
+            self._pricing_times['jump_diffusion'].append(analytical_time)
+            results['pricing_times']['jump_diffusion'] = analytical_time
+            
+            # Monte Carlo pricing
+            jd_mc_price, jd_mc_ci = jd_model.monte_carlo_price(
+                market_data, option_type, n_paths=50000
+            )
+            
+            results['jump_diffusion'] = {
+                'analytical_price': jd_analytical_price,
+                'monte_carlo_price': jd_mc_price,
+                'monte_carlo_ci': jd_mc_ci,
+                'parameters': asdict(jump_params)
+            }
+        
+        # Finite difference pricing
+        print("Computing finite difference pricing...")
+        start_time = time.perf_counter()
+        fd_price, _, _ = self.fd_pricer.implicit_fd_vanilla(
+            market_data, option_type, S_max=2*market_data.S0, M=100, N=500
+        )
+        fd_time = time.perf_counter() - start_time
+        self._pricing_times['finite_difference'].append(fd_time)
+        results['pricing_times']['finite_difference'] = fd_time
+        
+        results['finite_difference'] = {'price': fd_price}
+        
+        # Store results
+        self.results_history.append(results)
+        
+        return results
+    
+    def price_exotic_options(self, market_data: MarketData) -> Dict[str, Any]:
+        """
+        Price various exotic options using Monte Carlo simulation.
+        
+        Args:
+            market_data: Market conditions
+            
+        Returns:
+            Dictionary with exotic option prices and confidence intervals
+        """
+        print("Computing exotic option prices...")
+        
+        exotic_results = {}
+        
+        # Barrier options
+        barrier_configs = [
+            ('up_out_call', OptionType.CALL, 'up_out', market_data.S0 * 1.2),
+            ('down_out_put', OptionType.PUT, 'down_out', market_data.S0 * 0.8),
+            ('up_in_call', OptionType.CALL, 'up_in', market_data.S0 * 1.15)
+        ]
+        
+        for name, opt_type, barrier_type, barrier_level in barrier_configs:
+            price, ci = self.exotic_engine.barrier_option_mc(
+                market_data, opt_type, barrier_type, barrier_level, n_paths=50000
+            )
+            exotic_results[name] = {
+                'price': price,
+                'confidence_interval': ci,
+                'barrier_level': barrier_level,
+                'barrier_type': barrier_type
+            }
+        
+        # Asian options
+        asian_configs = [
+            ('asian_call_arithmetic', OptionType.CALL, 'arithmetic'),
+            ('asian_put_arithmetic', OptionType.PUT, 'arithmetic'),
+            ('asian_call_geometric', OptionType.CALL, 'geometric')
+        ]
+        
+        for name, opt_type, avg_type in asian_configs:
+            price, ci = self.exotic_engine.asian_option_mc(
+                market_data, opt_type, avg_type, n_paths=50000
+            )
+            exotic_results[name] = {
+                'price': price,
+                'confidence_interval': ci,
+                'average_type': avg_type
+            }
+        
+        # Lookback options
+        lookback_configs = [
+            ('lookback_call', 'lookback_call'),
+            ('lookback_put', 'lookback_put')
+        ]
+        
+        for name, lookback_type in lookback_configs:
+            price, ci = self.exotic_engine.lookback_option_mc(
+                market_data, lookback_type, n_paths=50000
+            )
+            exotic_results[name] = {
+                'price': price,
+                'confidence_interval': ci
+            }
+        
+        return exotic_results
+    
+    def portfolio_risk_analysis(
+        self, 
+        positions: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """
+        Perform portfolio-level risk analysis.
+        
+        Args:
+            positions: List of position dictionaries with keys:
+                - 'market_data': MarketData object
+                - 'option_type': str ('call' or 'put')
+                - 'quantity': int (positive for long, negative for short)
+                
+        Returns:
+            Portfolio risk metrics including aggregated Greeks and VaR
+        """
+        print("Computing portfolio risk metrics...")
+        
+        portfolio_greeks = {'delta': 0, 'gamma': 0, 'theta': 0, 'vega': 0, 'rho': 0}
+        portfolio_value = 0
+        position_details = []
+        
+        for i, position in enumerate(positions):
+            market_data = position['market_data']
+            option_type = validate_option_type(position['option_type'])
+            quantity = position['quantity']
+            
+            # Calculate option price and Greeks
+            price = self.bs_model.price(market_data, option_type)
+            greeks = self.bs_model.greeks(market_data, option_type)
+            
+            # Scale by position size
+            position_value = price * quantity
+            portfolio_value += position_value
+            
+            position_detail = {
+                'position_id': i,
+                'strike': market_data.K,
+                'expiry': market_data.T,
+                'spot': market_data.S0,
+                'option_type': option_type,
+                'quantity': quantity,
+                'unit_price': price,
+                'total_value': position_value,
+                'greeks': {},
+                'percentage_of_portfolio': 0.0  # Will be calculated later
+            }
+            
+            # Aggregate Greeks
+            for greek_name, greek_value in greeks.items():
+                scaled_greek = greek_value * quantity
+                portfolio_greeks[greek_name] += scaled_greek
+                position_detail['greeks'][greek_name] = scaled_greek
+            
+            position_details.append(position_detail)
+        
+        # Calculate position percentages
+        for position in position_details:
+            if portfolio_value != 0:
+                position['percentage_of_portfolio'] = (
+                    position['total_value'] / portfolio_value * 100
+                )
+        
+        # Value at Risk (VaR) estimation using delta-normal method
+        confidence_levels = [0.95, 0.99]
+        holding_period = 1/252  # 1 day
+        
+        # Estimate portfolio volatility (simplified approach)
+        avg_spot = np.mean([pos['spot'] for pos in position_details])
+        portfolio_volatility = abs(portfolio_greeks['delta']) * 0.20 * np.sqrt(holding_period)
+        
+        var_estimates = {}
+        for conf_level in confidence_levels:
+            var_value = -stats.norm.ppf(1 - conf_level) * portfolio_volatility * avg_spot
+            var_estimates[f'var_{int(conf_level*100)}'] = var_value
+        
+        # Risk concentration analysis
+        risk_concentration = self._analyze_risk_concentration(position_details, portfolio_value)
+        
+        return {
+            'portfolio_value': portfolio_value,
+            'portfolio_greeks': portfolio_greeks,
+            'var_estimates': var_estimates,
+            'risk_concentration': risk_concentration,
+            'position_count': len(positions),
+            'position_details': position_details,
+            'analysis_timestamp': pd.Timestamp.now()
+        }
+    
+    def _analyze_risk_concentration(
+        self, 
+        position_details: List[Dict], 
+        portfolio_value: float
+    ) -> Dict[str, Any]:
+        """Analyze risk concentration in the portfolio."""
+        
+        if not position_details or portfolio_value == 0:
+            return {}
+        
+        # Concentration by option type
+        call_value = sum(pos['total_value'] for pos in position_details 
+                        if pos['option_type'] == OptionType.CALL)
+        put_value = sum(pos['total_value'] for pos in position_details 
+                       if pos['option_type'] == OptionType.PUT)
+        
+        # Concentration by expiry
+        expiry_groups = {}
+        for pos in position_details:
+            expiry_bucket = round(pos['expiry'], 2)  # Round to nearest 0.01 years
+            if expiry_bucket not in expiry_groups:
+                expiry_groups[expiry_bucket] = 0
+            expiry_groups[expiry_bucket] += pos['total_value']
+        
+        # Concentration by moneyness
+        moneyness_groups = {'deep_otm': 0, 'otm': 0, 'atm': 0, 'itm': 0, 'deep_itm': 0}
+        for pos in position_details:
+            moneyness = pos['spot'] / pos['strike']
+            if moneyness < 0.9:
+                bucket = 'deep_otm' if pos['option_type'] == OptionType.CALL else 'deep_itm'
+            elif moneyness < 0.95:
+                bucket = 'otm' if pos['option_type'] == OptionType.CALL else 'itm'
+            elif moneyness <= 1.05:
+                bucket = 'atm'
+            elif moneyness <= 1.1:
+                bucket = 'itm' if pos['option_type'] == OptionType.CALL else 'otm'
+            else:
+                bucket = 'deep_itm' if pos['option_type'] == OptionType.CALL else 'deep_otm'
+            
+            moneyness_groups[bucket] += pos['total_value']
+        
+        return {
+            'by_option_type': {
+                'call_percentage': (call_value / portfolio_value * 100) if portfolio_value else 0,
+                'put_percentage': (put_value / portfolio_value * 100) if portfolio_value else 0
+            },
+            'by_expiry': {k: (v / portfolio_value * 100) for k, v in expiry_groups.items()},
+            'by_moneyness': {k: (v / portfolio_value * 100) for k, v in moneyness_groups.items()},
+            'largest_position_percentage': max(
+                pos['percentage_of_portfolio'] for pos in position_details
+            ) if position_details else 0
+        }
+    
+    def sensitivity_analysis(
+        self,
+        market_data: MarketData,
+        option_type: str,
+        param_ranges: Dict[str, np.ndarray]
+    ) -> Dict[str, Any]:
+        """
+        Perform comprehensive sensitivity analysis.
+        
+        Args:
+            market_data: Base market conditions
+            option_type: 'call' or 'put'
+            param_ranges: Dictionary mapping parameter names to value arrays
+            
+        Returns:
+            Sensitivity analysis results
+        """
+        print("Running sensitivity analysis...")
+        option_type = validate_option_type(option_type)
+        
+        sensitivity_results = {}
+        base_price = self.bs_model.price(market_data, option_type)
+        base_greeks = self.bs_model.greeks(market_data, option_type)
+        
+        for param_name, param_values in param_ranges.items():
+            prices = []
+            deltas = []
+            vegas = []
+            
+            for value in param_values:
+                # Create modified market data
+                kwargs = {param_name: value}
+                modified_data = market_data.copy(**kwargs)
+                
+                try:
+                    price = self.bs_model.price(modified_data, option_type)
+                    greeks = self.bs_model.greeks(modified_data, option_type)
+                    
+                    prices.append(price)
+                    deltas.append(greeks['delta'])
+                    vegas.append(greeks['vega'])
+                    
+                except Exception as e:
+                    # Handle edge cases (e.g., negative time)
+                    prices.append(np.nan)
+                    deltas.append(np.nan)
+                    vegas.append(np.nan)
+            
+            sensitivity_results[param_name] = {
+                'values': param_values,
+                'prices': np.array(prices),
+                'deltas': np.array(deltas),
+                'vegas': np.array(vegas),
+                'base_price': base_price,
+                'base_greeks': base_greeks,
+                'price_range': (np.nanmin(prices), np.nanmax(prices)),
+                'max_price_change': np.nanmax(np.abs(np.array(prices) - base_price))
+            }
+        
+        return sensitivity_results
+    
+    def benchmark_performance(
+        self,
+        market_data: MarketData,
+        option_type: str,
+        n_iterations: int = 1000
+    ) -> Dict[str, Any]:
+        """
+        Benchmark pricing performance across different methods.
+        
+        Args:
+            market_data: Market conditions for benchmarking
+            option_type: 'call' or 'put'
+            n_iterations: Number of iterations for timing
+            
+        Returns:
+            Performance benchmark results
+        """
+        print(f"Benchmarking performance over {n_iterations} iterations...")
+        option_type = validate_option_type(option_type)
+        
+        benchmark_results = {}
+        
+        # Black-Scholes
