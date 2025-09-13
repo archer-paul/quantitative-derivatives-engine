@@ -187,17 +187,18 @@ class TestBlackScholesModel:
     
     def test_invalid_inputs(self):
         """Test handling of invalid inputs."""
-        
-        with pytest.raises(ValueError):
+        from derivatives_engine.utils.exceptions import ValidationError
+
+        with pytest.raises(ValidationError):
             invalid_market = MarketData(S0=-100, K=100, T=0.25, r=0.05, sigma=0.2)
-        
-        with pytest.raises(ValueError):
+
+        with pytest.raises(ValidationError):
             invalid_market = MarketData(S0=100, K=-100, T=0.25, r=0.05, sigma=0.2)
-        
-        with pytest.raises(ValueError):
+
+        with pytest.raises(ValidationError):
             invalid_market = MarketData(S0=100, K=100, T=-0.25, r=0.05, sigma=0.2)
         
-        with pytest.raises(ValueError):
+        with pytest.raises(ValidationError):
             invalid_market = MarketData(S0=100, K=100, T=0.25, r=0.05, sigma=-0.2)
         
         # Test invalid option type

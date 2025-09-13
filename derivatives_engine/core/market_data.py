@@ -136,8 +136,17 @@ class MarketData:
     
     def __repr__(self) -> str:
         """String representation of market data."""
-        return (f"MarketData(S0={self.S0}, K={self.K}, T={self.T:.4f}, "
-                f"r={self.r:.4f}, q={self.q:.4f}, sigma={self.sigma:.4f})")
+        # Handle DualNumber objects that don't support format strings
+        from .auto_diff import DualNumber
+
+        def format_val(val, precision=4):
+            if isinstance(val, DualNumber):
+                return str(val)
+            else:
+                return f"{val:.{precision}f}"
+
+        return (f"MarketData(S0={format_val(self.S0)}, K={format_val(self.K)}, T={format_val(self.T)}, "
+                f"r={format_val(self.r)}, q={format_val(self.q)}, sigma={format_val(self.sigma)})")
 
 
 def validate_option_type(option_type: str) -> str:

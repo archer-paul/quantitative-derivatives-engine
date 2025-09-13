@@ -25,23 +25,34 @@ class InputValidator:
         # Handle DualNumber objects from automatic differentiation
         from ..core.auto_diff import DualNumber
         if isinstance(price, DualNumber):
+            # For DualNumber, validate the real part and return the DualNumber unchanged
             price_val = price.real
+            if not isinstance(price_val, (int, float, np.number)):
+                raise ValidationError(f"{name} must be a number", name, price)
+
+            if np.isnan(price_val) or np.isinf(price_val):
+                raise ValidationError(f"{name} must be finite", name, price)
+
+            if allow_zero and price_val < 0:
+                raise ValidationError(f"{name} must be non-negative", name, price)
+            elif not allow_zero and price_val <= 0:
+                raise ValidationError(f"{name} must be positive", name, price)
+
+            return price  # Return DualNumber unchanged
         else:
-            price_val = price
-            
-        if not isinstance(price_val, (int, float, np.number)):
-            raise ValidationError(f"{name} must be a number", name, price)
-        
-        if np.isnan(price_val) or np.isinf(price_val):
-            raise ValidationError(f"{name} must be finite", name, price)
-        
-        if allow_zero and price_val < 0:
-            raise ValidationError(f"{name} must be non-negative", name, price)
-        elif not allow_zero and price_val <= 0:
-            raise ValidationError(f"{name} must be positive", name, price)
-        
-        from ..core.auto_diff import DualNumber
-        return float(price_val) if not isinstance(price, DualNumber) else price
+            # Regular number validation
+            if not isinstance(price, (int, float, np.number)):
+                raise ValidationError(f"{name} must be a number", name, price)
+
+            if np.isnan(price) or np.isinf(price):
+                raise ValidationError(f"{name} must be finite", name, price)
+
+            if allow_zero and price < 0:
+                raise ValidationError(f"{name} must be non-negative", name, price)
+            elif not allow_zero and price <= 0:
+                raise ValidationError(f"{name} must be positive", name, price)
+
+            return float(price)
     
     @staticmethod
     def validate_strike(strike: float, name: str = "strike") -> float:
@@ -391,11 +402,20 @@ def validate_market_data_input(func):
         # Extract market data from arguments (assuming first arg is MarketData object)
         if args and hasattr(args[0], 'S0'):
             market_data = args[0]
-            MarketDataValidator.validate_market_data_consistency(
-                market_data.S0, market_data.K, market_data.T, 
-                market_data.r, getattr(market_data, 'q', 0.0),
-                getattr(market_data, 'sigma', None)
-            )
-        
+
+            # Skip validation if any parameter is a DualNumber (for Greeks calculation)
+            from ..core.auto_diff import DualNumber
+            params = [market_data.S0, market_data.K, market_data.T, market_data.r,
+                     getattr(market_data, 'q', 0.0), getattr(market_data, 'sigma', None)]
+
+            has_dual = any(isinstance(p, DualNumber) for p in params if p is not None)
+
+            if not has_dual:
+                MarketDataValidator.validate_market_data_consistency(
+                    market_data.S0, market_data.K, market_data.T,
+                    market_data.r, getattr(market_data, 'q', 0.0),
+                    getattr(market_data, 'sigma', None)
+                )
+
         return func(*args, **kwargs)
     return wrapper
