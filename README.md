@@ -588,7 +588,7 @@ If you use this software in your research, please cite:
 @software{quantitative_derivatives_engine,
   title={Quantitative Derivatives Engine: Advanced Options Pricing and Risk Analysis},
   author={Paul Archer},
-  year={2024},
+  year={2025},
   url={https://github.com/archer-paul/quantitative-derivatives-engine}
 }
 ```

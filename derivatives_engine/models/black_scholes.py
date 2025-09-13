@@ -11,6 +11,9 @@ from scipy import stats
 
 from ..core.market_data import MarketData, OptionType, validate_option_type
 from ..core.auto_diff import DualNumber, exp, log, sqrt, norm_cdf
+from ..utils.logging_config import get_logger, log_performance
+from ..utils.exceptions import ModelError, handle_numerical_result
+from ..utils.validation import validate_market_data_input
 
 
 class BlackScholesModel:
@@ -55,6 +58,8 @@ class BlackScholesModel:
         return d1, d2
     
     @staticmethod
+    @validate_market_data_input
+    @log_performance("Black-Scholes pricing")
     def price(market_data: MarketData, option_type: str) -> float:
         """
         Calculate Black-Scholes option price.
@@ -69,39 +74,63 @@ class BlackScholesModel:
             
         Returns:
             Option price as float
+            
+        Raises:
+            ModelError: If pricing calculation fails
+            ValidationError: If inputs are invalid
         """
-        option_type = validate_option_type(option_type)
-        S, K, T, r, q, sigma = (
-            market_data.S0, market_data.K, market_data.T,
-            market_data.r, market_data.q, market_data.sigma
-        )
+        logger = get_logger(__name__)
         
-        # Handle expiration case
-        from ..core.auto_diff import DualNumber
-        T_val = T.real if isinstance(T, DualNumber) else T
-        if T_val <= 0:
-            S_val = S.real if isinstance(S, DualNumber) else S
-            K_val = K.real if isinstance(K, DualNumber) else K
+        try:
+            option_type = validate_option_type(option_type)
+            S, K, T, r, q, sigma = (
+                market_data.S0, market_data.K, market_data.T,
+                market_data.r, market_data.q, market_data.sigma
+            )
+        
+            # Handle expiration case
+            from ..core.auto_diff import DualNumber
+            T_val = T.real if isinstance(T, DualNumber) else T
+            if T_val <= 0:
+                S_val = S.real if isinstance(S, DualNumber) else S
+                K_val = K.real if isinstance(K, DualNumber) else K
+                if option_type == OptionType.CALL:
+                    result = max(S_val - K_val, 0)
+                else:
+                    result = max(K_val - S_val, 0)
+                logger.debug(f"Option at expiration, intrinsic value: {result}")
+                return handle_numerical_result(result, "Black-Scholes intrinsic value")
+            
+            # Calculate d1 and d2
+            d1, d2 = BlackScholesModel._d1_d2(S, K, T, r, q, sigma)
+            
+            # Calculate option price
             if option_type == OptionType.CALL:
-                return max(S_val - K_val, 0)
+                price = S * exp(-q * T) * norm_cdf(d1) - K * exp(-r * T) * norm_cdf(d2)
+            else:  # PUT
+                price = K * exp(-r * T) * norm_cdf(-d2) - S * exp(-q * T) * norm_cdf(-d1)
+            
+            # Extract real value if DualNumber
+            if isinstance(price, DualNumber):
+                result = price.real
             else:
-                return max(K_val - S_val, 0)
-        
-        # Calculate d1 and d2
-        d1, d2 = BlackScholesModel._d1_d2(S, K, T, r, q, sigma)
-        
-        # Calculate option price
-        if option_type == OptionType.CALL:
-            price = S * exp(-q * T) * norm_cdf(d1) - K * exp(-r * T) * norm_cdf(d2)
-        else:  # PUT
-            price = K * exp(-r * T) * norm_cdf(-d2) - S * exp(-q * T) * norm_cdf(-d1)
-        
-        # Extract real value if DualNumber
-        if isinstance(price, DualNumber):
-            return price.real
-        return float(price)
+                result = float(price)
+            
+            # Validate result
+            result = handle_numerical_result(result, "Black-Scholes price")
+            
+            logger.debug(f"Black-Scholes {option_type} price calculated: {result}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Black-Scholes pricing failed: {e}")
+            if isinstance(e, (ModelError, ValueError)):
+                raise
+            raise ModelError(f"Black-Scholes pricing calculation failed: {e}", "BlackScholesModel")
     
     @staticmethod
+    @validate_market_data_input
+    @log_performance("Black-Scholes Greeks calculation")
     def greeks(market_data: MarketData, option_type: str) -> Dict[str, float]:
         """
         Calculate all Greeks using automatic differentiation.
@@ -120,106 +149,123 @@ class BlackScholesModel:
             - theta: ∂V/∂T (time decay)
             - vega: ∂V/∂σ (volatility sensitivity)
             - rho: ∂V/∂r (interest rate sensitivity)
-        """
-        option_type = validate_option_type(option_type)
-        S, K, T, r, q, sigma = (
-            market_data.S0, market_data.K, market_data.T,
-            market_data.r, market_data.q, market_data.sigma
-        )
-        
-        # Handle expiration case
-        from ..core.auto_diff import DualNumber
-        T_val = T.real if isinstance(T, DualNumber) else T
-        if T_val <= 0:
-            S_val = S.real if isinstance(S, DualNumber) else S
-            K_val = K.real if isinstance(K, DualNumber) else K
-            if option_type == OptionType.CALL:
-                delta = 1.0 if S_val > K_val else (0.5 if S_val == K_val else 0.0)
-            else:  # PUT
-                delta = -1.0 if S_val < K_val else (-0.5 if S_val == K_val else 0.0)
             
-            return {
-                'delta': delta,
-                'gamma': 0.0,
-                'theta': 0.0,
-                'vega': 0.0,
-                'rho': 0.0
+        Raises:
+            ModelError: If Greeks calculation fails
+            ValidationError: If inputs are invalid
+        """
+        logger = get_logger(__name__)
+        
+        try:
+            option_type = validate_option_type(option_type)
+            S, K, T, r, q, sigma = (
+                market_data.S0, market_data.K, market_data.T,
+                market_data.r, market_data.q, market_data.sigma
+            )
+            
+            # Handle expiration case
+            from ..core.auto_diff import DualNumber
+            T_val = T.real if isinstance(T, DualNumber) else T
+            if T_val <= 0:
+                S_val = S.real if isinstance(S, DualNumber) else S
+                K_val = K.real if isinstance(K, DualNumber) else K
+                if option_type == OptionType.CALL:
+                    delta = 1.0 if S_val > K_val else (0.5 if S_val == K_val else 0.0)
+                else:  # PUT
+                    delta = -1.0 if S_val < K_val else (-0.5 if S_val == K_val else 0.0)
+                
+                return {
+                    'delta': delta,
+                    'gamma': 0.0,
+                    'theta': 0.0,
+                    'vega': 0.0,
+                    'rho': 0.0
+                }
+            
+            # Delta: sensitivity to spot price
+            S_dual = DualNumber(S, 1.0)
+            market_delta = MarketData(S_dual, K, T, r, q, sigma)
+            delta = BlackScholesModel.price(market_delta, option_type)
+            if hasattr(delta, 'dual'):
+                delta = delta.dual
+            else:
+                # Fallback to analytical formula
+                d1, _ = BlackScholesModel._d1_d2(S, K, T, r, q, sigma)
+                if option_type == OptionType.CALL:
+                    delta = np.exp(-q * T) * stats.norm.cdf(d1)
+                else:
+                    delta = -np.exp(-q * T) * stats.norm.cdf(-d1)
+            
+            # Gamma: second derivative w.r.t. spot price (using finite difference)
+            eps = max(0.01, S * 0.0001)  # Adaptive step size
+            S_up = S + eps
+            S_down = S - eps
+            
+            market_up = MarketData(S_up, K, T, r, q, sigma)
+            market_down = MarketData(S_down, K, T, r, q, sigma)
+            market_center = MarketData(S, K, T, r, q, sigma)
+            
+            price_up = BlackScholesModel.price(market_up, option_type)
+            price_down = BlackScholesModel.price(market_down, option_type)
+            price_center = BlackScholesModel.price(market_center, option_type)
+            
+            gamma = (price_up - 2 * price_center + price_down) / (eps ** 2)
+            
+            # Theta: sensitivity to time (negative for time decay)
+            T_dual = DualNumber(T, 1.0)
+            market_theta = MarketData(S, K, T_dual, r, q, sigma)
+            theta_result = BlackScholesModel.price(market_theta, option_type)
+            if hasattr(theta_result, 'dual'):
+                theta = -theta_result.dual  # Negative for time decay
+            else:
+                # Fallback: small finite difference
+                T_eps = max(T * 0.001, 1/365)  # At least 1 day
+                market_theta_fd = MarketData(S, K, T - T_eps, r, q, sigma)
+                price_theta = BlackScholesModel.price(market_theta_fd, option_type)
+                theta = -(price_center - price_theta) / T_eps
+            
+            # Vega: sensitivity to volatility
+            sigma_dual = DualNumber(sigma, 1.0)
+            market_vega = MarketData(S, K, T, r, q, sigma_dual)
+            vega_result = BlackScholesModel.price(market_vega, option_type)
+            if hasattr(vega_result, 'dual'):
+                vega = vega_result.dual
+            else:
+                # Fallback to analytical formula
+                d1, _ = BlackScholesModel._d1_d2(S, K, T, r, q, sigma)
+                vega = S * np.exp(-q * T) * stats.norm.pdf(d1) * np.sqrt(T)
+            
+            # Rho: sensitivity to interest rate
+            r_dual = DualNumber(r, 1.0)
+            market_rho = MarketData(S, K, T, r_dual, q, sigma)
+            rho_result = BlackScholesModel.price(market_rho, option_type)
+            if hasattr(rho_result, 'dual'):
+                rho = rho_result.dual
+            else:
+                # Fallback to analytical formula
+                _, d2 = BlackScholesModel._d1_d2(S, K, T, r, q, sigma)
+                if option_type == OptionType.CALL:
+                    rho = K * T * np.exp(-r * T) * stats.norm.cdf(d2)
+                else:
+                    rho = -K * T * np.exp(-r * T) * stats.norm.cdf(-d2)
+        
+            # Validate all Greeks
+            greeks_dict = {
+                'delta': handle_numerical_result(float(delta), "Delta"),
+                'gamma': handle_numerical_result(float(gamma), "Gamma"),
+                'theta': handle_numerical_result(float(theta), "Theta", allow_negative=True),
+                'vega': handle_numerical_result(float(vega), "Vega"),
+                'rho': handle_numerical_result(float(rho), "Rho", allow_negative=True)
             }
-        
-        # Delta: sensitivity to spot price
-        S_dual = DualNumber(S, 1.0)
-        market_delta = MarketData(S_dual, K, T, r, q, sigma)
-        delta = BlackScholesModel.price(market_delta, option_type)
-        if hasattr(delta, 'dual'):
-            delta = delta.dual
-        else:
-            # Fallback to analytical formula
-            d1, _ = BlackScholesModel._d1_d2(S, K, T, r, q, sigma)
-            if option_type == OptionType.CALL:
-                delta = np.exp(-q * T) * stats.norm.cdf(d1)
-            else:
-                delta = -np.exp(-q * T) * stats.norm.cdf(-d1)
-        
-        # Gamma: second derivative w.r.t. spot price (using finite difference)
-        eps = max(0.01, S * 0.0001)  # Adaptive step size
-        S_up = S + eps
-        S_down = S - eps
-        
-        market_up = MarketData(S_up, K, T, r, q, sigma)
-        market_down = MarketData(S_down, K, T, r, q, sigma)
-        market_center = MarketData(S, K, T, r, q, sigma)
-        
-        price_up = BlackScholesModel.price(market_up, option_type)
-        price_down = BlackScholesModel.price(market_down, option_type)
-        price_center = BlackScholesModel.price(market_center, option_type)
-        
-        gamma = (price_up - 2 * price_center + price_down) / (eps ** 2)
-        
-        # Theta: sensitivity to time (negative for time decay)
-        T_dual = DualNumber(T, 1.0)
-        market_theta = MarketData(S, K, T_dual, r, q, sigma)
-        theta_result = BlackScholesModel.price(market_theta, option_type)
-        if hasattr(theta_result, 'dual'):
-            theta = -theta_result.dual  # Negative for time decay
-        else:
-            # Fallback: small finite difference
-            T_eps = max(T * 0.001, 1/365)  # At least 1 day
-            market_theta_fd = MarketData(S, K, T - T_eps, r, q, sigma)
-            price_theta = BlackScholesModel.price(market_theta_fd, option_type)
-            theta = -(price_center - price_theta) / T_eps
-        
-        # Vega: sensitivity to volatility
-        sigma_dual = DualNumber(sigma, 1.0)
-        market_vega = MarketData(S, K, T, r, q, sigma_dual)
-        vega_result = BlackScholesModel.price(market_vega, option_type)
-        if hasattr(vega_result, 'dual'):
-            vega = vega_result.dual
-        else:
-            # Fallback to analytical formula
-            d1, _ = BlackScholesModel._d1_d2(S, K, T, r, q, sigma)
-            vega = S * np.exp(-q * T) * stats.norm.pdf(d1) * np.sqrt(T)
-        
-        # Rho: sensitivity to interest rate
-        r_dual = DualNumber(r, 1.0)
-        market_rho = MarketData(S, K, T, r_dual, q, sigma)
-        rho_result = BlackScholesModel.price(market_rho, option_type)
-        if hasattr(rho_result, 'dual'):
-            rho = rho_result.dual
-        else:
-            # Fallback to analytical formula
-            _, d2 = BlackScholesModel._d1_d2(S, K, T, r, q, sigma)
-            if option_type == OptionType.CALL:
-                rho = K * T * np.exp(-r * T) * stats.norm.cdf(d2)
-            else:
-                rho = -K * T * np.exp(-r * T) * stats.norm.cdf(-d2)
-        
-        return {
-            'delta': float(delta),
-            'gamma': float(gamma),
-            'theta': float(theta),
-            'vega': float(vega),
-            'rho': float(rho)
-        }
+            
+            logger.debug(f"Black-Scholes Greeks calculated: {greeks_dict}")
+            return greeks_dict
+            
+        except Exception as e:
+            logger.error(f"Black-Scholes Greeks calculation failed: {e}")
+            if isinstance(e, (ModelError, ValueError)):
+                raise
+            raise ModelError(f"Greeks calculation failed: {e}", "BlackScholesModel")
     
     @staticmethod
     def implied_volatility(

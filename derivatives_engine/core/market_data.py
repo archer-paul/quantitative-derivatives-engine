@@ -48,24 +48,30 @@ class MarketData:
     def __post_init__(self):
         """Validate market data inputs after initialization."""
         from .auto_diff import DualNumber
+        from ..utils.validation import MarketDataValidator
+        from ..utils.logging_config import get_logger
         
-        # Extract real values for validation if DualNumber objects are used
-        S0_val = self.S0.real if isinstance(self.S0, DualNumber) else self.S0
-        K_val = self.K.real if isinstance(self.K, DualNumber) else self.K
-        T_val = self.T.real if isinstance(self.T, DualNumber) else self.T
-        sigma_val = self.sigma.real if isinstance(self.sigma, DualNumber) else self.sigma
-        q_val = self.q.real if isinstance(self.q, DualNumber) else self.q
+        logger = get_logger(__name__)
         
-        if S0_val <= 0:
-            raise ValueError("Stock price S0 must be positive")
-        if K_val <= 0:
-            raise ValueError("Strike price K must be positive")
-        if T_val < 0:
-            raise ValueError("Time to expiration T must be non-negative")
-        if sigma_val < 0:
-            raise ValueError("Volatility sigma must be non-negative")
-        if q_val < 0:
-            raise ValueError("Dividend yield q must be non-negative")
+        try:
+            # Extract real values for validation if DualNumber objects are used
+            S0_val = self.S0.real if isinstance(self.S0, DualNumber) else self.S0
+            K_val = self.K.real if isinstance(self.K, DualNumber) else self.K
+            T_val = self.T.real if isinstance(self.T, DualNumber) else self.T
+            r_val = self.r.real if isinstance(self.r, DualNumber) else self.r
+            sigma_val = self.sigma.real if isinstance(self.sigma, DualNumber) else self.sigma
+            q_val = self.q.real if isinstance(self.q, DualNumber) else self.q
+            
+            # Use comprehensive validation
+            MarketDataValidator.validate_market_data_consistency(
+                S0_val, K_val, T_val, r_val, q_val, sigma_val
+            )
+            
+            logger.debug(f"MarketData validation passed: {self}")
+            
+        except Exception as e:
+            logger.error(f"MarketData validation failed: {e}")
+            raise
     
     @property
     def moneyness(self) -> float:

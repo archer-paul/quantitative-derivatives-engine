@@ -1,0 +1,41 @@
+{
+  "numerical": {
+    "default_monte_carlo_paths": 100000,
+    "default_monte_carlo_steps": 252,
+    "default_fd_grid_points": 100,
+    "default_fd_time_steps": 1000,
+    "default_binomial_steps": 1000,
+    "convergence_tolerance": 1e-8,
+    "max_iterations": 10000,
+    "random_seed": null
+  },
+  "cache": {
+    "enable_pricing_cache": true,
+    "enable_data_cache": true,
+    "cache_ttl_seconds": 3600,
+    "max_cache_size": 1000,
+    "cache_directory": "cache"
+  },
+  "logging": {
+    "log_level": "INFO",
+    "log_to_file": true,
+    "log_to_console": true,
+    "log_directory": "logs",
+    "max_log_file_size_mb": 10,
+    "max_log_files": 5
+  },
+  "data": {
+    "default_data_source": "yahoo",
+    "data_cache_days": 1,
+    "retry_attempts": 3,
+    "request_timeout": 30,
+    "rate_limit_delay": 0.1
+  },
+  "performance": {
+    "enable_jit": true,
+    "enable_vectorization": true,
+    "enable_parallel_processing": true,
+    "max_threads": null,
+    "memory_limit_mb": null
+  }
+}
