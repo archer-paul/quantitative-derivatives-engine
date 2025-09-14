@@ -1,6 +1,6 @@
 # Quantitative Derivatives Engine
 
-[🇬🇧 English Version](README.md) | [🇫🇷 Version Française](README_FR.md)
+English Version | [Version Française](README_FR.md)
 
 A state-of-the-art derivatives pricing engine implementing advanced mathematical models for vanilla and exotic options pricing, with automatic differentiation for Greeks calculation and comprehensive risk analysis capabilities.
 

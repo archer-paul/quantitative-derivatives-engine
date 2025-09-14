@@ -116,10 +116,10 @@ jobs:
 
         # More lenient for CI servers
         if avg_time_ms < 2.0:
-            print('🚀 Excellent performance!')
+            print('Excellent performance!')
         elif avg_time_ms < 10.0:
             print('✓ Good performance')
         else:
-            print(f'⚠️ Performance could be better: {avg_time_ms:.3f} ms')
+            print(f'Performance could be better: {avg_time_ms:.3f} ms')
         "
         echo "Performance benchmark completed"

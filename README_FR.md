@@ -1,6 +1,6 @@
 # Moteur Quantitatif de Dérivés
 
-[🇫🇷 Version Française](README_FR.md) | [🇬🇧 English Version](README.md)
+Version Française | [English Version](README.md)
 
 Un moteur de pricing de dérivés de pointe implémentant des modèles mathématiques avancés pour le pricing d'options vanilles et exotiques, avec différentiation automatique pour le calcul des Greeks et des capacités d'analyse de risque complètes.
 
